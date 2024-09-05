@@ -1,7 +1,9 @@
 const WebSocket = require('ws');
 const express = require('express');
 const crypto = require('crypto');
+const repl = require('repl');  // Import the REPL module
 
+// Function to connect to a peer
 const connectToPeer = (peerAddress) => {
     const ws = new WebSocket(peerAddress);
     
@@ -23,7 +25,6 @@ const connectToPeer = (peerAddress) => {
     });
 };
 
-
 // Array to store peers
 let peers = [];
 
@@ -42,7 +43,7 @@ const broadcastChain = (blockchain) => {
 // Synchronize chains when receiving data
 const synchronizeChain = (receivedChain) => {
     if (receivedChain.length > blockchain.chain.length) {
-        console.log('Updating blockchain');
+        console.log('Received new chain. Updating blockchain...');
         blockchain.chain = receivedChain;
     }
 };
@@ -63,6 +64,9 @@ const startWebSocketServer = (wsPort) => {
         ws.on('close', () => {
             console.log('Peer disconnected');
         });
+
+        // Send the current blockchain to the new peer
+        ws.send(JSON.stringify(blockchain.chain));
     });
 
     console.log(`WebSocket server started on port ${wsPort}`);
@@ -71,7 +75,6 @@ const startWebSocketServer = (wsPort) => {
 // Start the WebSocket server
 const wsPort = parseInt(process.argv[2]) + 1; // WebSocket port is HTTP port + 1
 startWebSocketServer(wsPort);
-
 
 // Block class: represents each block in the blockchain
 class Block {
@@ -105,7 +108,6 @@ class Blockchain {
         this.chain = [this.createGenesisBlock()];
         this.difficulty = 2;
         this.pendingTransactions = [];
-        this.peers = [];
     }
 
     // Create the genesis block (first block in the chain)
@@ -120,11 +122,17 @@ class Blockchain {
 
     // Mining pending transactions into a block
     minePendingTransactions() {
-        let block = new Block(this.chain.length, this.getLatestBlock().hash, Date.now(), this.pendingTransactions);
+        const block = new Block(this.chain.length, this.getLatestBlock().hash, Date.now(), this.pendingTransactions);
         block.mineBlock(this.difficulty);
+
+        console.log('Block successfully mined!');
         this.chain.push(block);
+
+        // Reset the pending transactions
         this.pendingTransactions = [];
-        this.broadcastChain();
+
+        // Broadcast the updated chain to connected peers
+        broadcastChain(this);
     }
 
     // Add a new transaction to the pending transactions
@@ -156,16 +164,6 @@ class Blockchain {
             console.log('Blockchain updated to the longest chain');
         }
     }
-
-    // Broadcast the current chain to all peers
-    broadcastChain() {
-        this.peers.forEach(ws => ws.send(JSON.stringify(this.chain)));
-    }
-
-    // Add peers to the node
-    addPeer(peer) {
-        this.peers.push(peer);
-    }
 }
 
 // Create a new instance of the blockchain
@@ -180,24 +178,6 @@ app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
 
-// WebSocket server for peer-to-peer communication
-const wss = new WebSocket.Server({ port: PORT + 1 });
-
-// Handle WebSocket connections (peers)
-wss.on('connection', (ws) => {
-    console.log('New peer connected');
-    blockchain.addPeer(ws);
-
-    // Receive messages from peers
-    ws.on('message', (message) => {
-        const receivedChain = JSON.parse(message);
-        blockchain.synchronizeChain(receivedChain);
-    });
-
-    // Send the current blockchain to the new peer
-    ws.send(JSON.stringify(blockchain.chain));
-});
-
 // Example transactions to test the blockchain
 blockchain.createTransaction({ sender: "Alice", receiver: "Bob", amount: 50 });
 blockchain.minePendingTransactions();
@@ -208,4 +188,17 @@ blockchain.minePendingTransactions();
 if (PORT != 3000) {
     connectToPeer('ws://localhost:3001');  // Connecting Node 2 to Node 1
 }
+
+// Start REPL to interact with the blockchain
+const startRepl = () => {
+    const replServer = repl.start('> ');
+
+    // Expose blockchain and peers array in the REPL context
+    replServer.context.blockchain = blockchain;
+    replServer.context.peers = peers;
+    replServer.context.connectToPeer = connectToPeer;
+    replServer.context.broadcastChain = broadcastChain;
+};
+
+startRepl();
 

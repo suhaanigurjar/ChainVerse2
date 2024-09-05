@@ -2,6 +2,77 @@ const WebSocket = require('ws');
 const express = require('express');
 const crypto = require('crypto');
 
+const connectToPeer = (peerAddress) => {
+    const ws = new WebSocket(peerAddress);
+    
+    ws.on('open', () => {
+        console.log(`Connected to peer: ${peerAddress}`);
+        peers.push(ws);  // Add the peer to the list
+
+        // Send blockchain to the newly connected peer
+        ws.send(JSON.stringify(blockchain.chain));
+    });
+
+    ws.on('message', (message) => {
+        const receivedChain = JSON.parse(message);
+        synchronizeChain(receivedChain);
+    });
+
+    ws.on('error', (error) => {
+        console.log(`Error connecting to peer: ${peerAddress}`, error);
+    });
+};
+
+
+// Array to store peers
+let peers = [];
+
+// Add peer to the array
+const addPeer = (ws) => {
+    peers.push(ws);
+};
+
+// Broadcast chain to all connected peers
+const broadcastChain = (blockchain) => {
+    peers.forEach(peer => {
+        peer.send(JSON.stringify(blockchain.chain));
+    });
+};
+
+// Synchronize chains when receiving data
+const synchronizeChain = (receivedChain) => {
+    if (receivedChain.length > blockchain.chain.length) {
+        console.log('Updating blockchain');
+        blockchain.chain = receivedChain;
+    }
+};
+
+// Function to start WebSocket server on a separate port
+const startWebSocketServer = (wsPort) => {
+    const server = new WebSocket.Server({ port: wsPort });
+
+    server.on('connection', (ws) => {
+        console.log(`Peer connected on port ${wsPort}`);
+        addPeer(ws);
+
+        ws.on('message', (message) => {
+            const receivedChain = JSON.parse(message);
+            synchronizeChain(receivedChain);
+        });
+
+        ws.on('close', () => {
+            console.log('Peer disconnected');
+        });
+    });
+
+    console.log(`WebSocket server started on port ${wsPort}`);
+};
+
+// Start the WebSocket server
+const wsPort = parseInt(process.argv[2]) + 1; // WebSocket port is HTTP port + 1
+startWebSocketServer(wsPort);
+
+
 // Block class: represents each block in the blockchain
 class Block {
     constructor(index, previousHash, timestamp, transactions, nonce = 0) {
@@ -132,3 +203,9 @@ blockchain.createTransaction({ sender: "Alice", receiver: "Bob", amount: 50 });
 blockchain.minePendingTransactions();
 blockchain.createTransaction({ sender: "Bob", receiver: "Charlie", amount: 25 });
 blockchain.minePendingTransactions();
+
+// Example: Automatically connect to other peers
+if (PORT != 3000) {
+    connectToPeer('ws://localhost:3001');  // Connecting Node 2 to Node 1
+}
+
